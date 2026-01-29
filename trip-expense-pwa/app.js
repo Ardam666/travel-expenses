@@ -1,21 +1,17 @@
+window.addEventListener("DOMContentLoaded", () => {
+
 // ---------- Helpers ----------
+function toNumberOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 const $ = (id) => document.getElementById(id);
 
 const money = (n) =>
   (Number(n || 0)).toLocaleString("es-AR", { style: "currency", currency: "USD" });
 
-const moneyARS = (n) =>
-  (Number(n || 0)).toLocaleString("es-AR", { style: "currency", currency: "ARS" });
-
 const todayISO = () => new Date().toISOString();
-
-function toNumberOrNull(v) {
-  if (v === null || v === undefined) return null;
-  const s = String(v).trim();
-  if (!s) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
 
 const DEFAULT_CATEGORIES = [
   "Café",
@@ -23,39 +19,45 @@ const DEFAULT_CATEGORIES = [
   "Restaurante",
   "Transporte",
   "Taxi / Uber",
-  "Propina",
-  "Farmacia",
+  "Alojamiento",
   "Compras",
-  "Entretenimiento",
+  "Entradas",
+  "Salud",
+  "Propinas",
   "Otros",
 ];
 
 // ---------- IndexedDB ----------
-const DB_NAME = "expenseDB";
-const DB_VERSION = 2;
+const DB_NAME = "trip-expense-pwa";
+const DB_VER = 1;
+
 let db;
 
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(DB_NAME, DB_VER);
 
     req.onupgradeneeded = () => {
       const d = req.result;
+
+      // expenses
       if (!d.objectStoreNames.contains("expenses")) {
-        d.createObjectStore("expenses", { keyPath: "id" });
+        const s = d.createObjectStore("expenses", { keyPath: "id" });
+        s.createIndex("date", "date");
       }
-      if (!d.objectStoreNames.contains("settings")) {
-        d.createObjectStore("settings", { keyPath: "key" });
-      }
+
+      // categories
       if (!d.objectStoreNames.contains("categories")) {
         d.createObjectStore("categories", { keyPath: "name" });
       }
+
+      // settings
+      if (!d.objectStoreNames.contains("settings")) {
+        d.createObjectStore("settings", { keyPath: "key" });
+      }
     };
 
-    req.onsuccess = () => {
-      db = req.result;
-      resolve(db);
-    };
+    req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
@@ -64,7 +66,7 @@ function store(name, mode = "readonly") {
   return db.transaction(name, mode).objectStore(name);
 }
 
-// Settings
+// ---------- Settings ----------
 function setSetting(key, value) {
   return new Promise((resolve, reject) => {
     const s = store("settings", "readwrite");
@@ -73,7 +75,6 @@ function setSetting(key, value) {
     req.onerror = () => reject(req.error);
   });
 }
-
 function getSetting(key) {
   return new Promise((resolve, reject) => {
     const s = store("settings");
@@ -83,14 +84,42 @@ function getSetting(key) {
   });
 }
 
-// Categories
+// ---------- FX (dólar oficial automático) ----------
+async function getFxRateAuto() {
+  const res = await fetch("/.netlify/functions/fx", { cache: "no-store" });
+  if (!res.ok) throw new Error("No se pudo obtener el dólar oficial");
+  const data = await res.json();
+  const rate = Number(data.rate);
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error("Tipo de cambio inválido");
+  return rate; // ARS por 1 USD
+}
+
+// ---------- Categories ----------
+async function seedDefaultCategoriesIfEmpty() {
+  const cats = await getAllCategories();
+  if (cats.length) return;
+
+  for (const name of DEFAULT_CATEGORIES) {
+    await addCategory(name);
+  }
+}
+
 function addCategory(name) {
-  const clean = (name || "").trim();
-  if (!clean) return Promise.resolve();
+  name = String(name || "").trim();
+  if (!name) return Promise.resolve();
 
   return new Promise((resolve, reject) => {
     const s = store("categories", "readwrite");
-    const req = s.put({ name: clean });
+    const req = s.put({ name });
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteCategory(name) {
+  return new Promise((resolve, reject) => {
+    const s = store("categories", "readwrite");
+    const req = s.delete(name);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -100,34 +129,25 @@ function getAllCategories() {
   return new Promise((resolve, reject) => {
     const s = store("categories");
     const req = s.getAll();
-    req.onsuccess = () =>
-      resolve((req.result || []).map((x) => x.name).sort((a, b) => a.localeCompare(b, "es")));
+    req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function seedDefaultCategoriesIfEmpty() {
-  const cats = await getAllCategories();
-  if (cats.length) return;
-  await Promise.all(DEFAULT_CATEGORIES.map(addCategory));
-}
-
-async function resetCategoriesToDefault() {
-  await new Promise((res, rej) => {
-    const tx = db.transaction(["categories"], "readwrite");
-    tx.objectStore("categories").clear();
-    tx.oncomplete = () => res();
-    tx.onerror = () => rej(tx.error);
-  });
-  await Promise.all(DEFAULT_CATEGORIES.map(addCategory));
-  await refreshCategoryDropdown();
-}
-
-// Expenses
+// ---------- Expenses ----------
 function addExpense(expense) {
   return new Promise((resolve, reject) => {
     const s = store("expenses", "readwrite");
-    const req = s.add(expense);
+    const req = s.put(expense);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteExpense(id) {
+  return new Promise((resolve, reject) => {
+    const s = store("expenses", "readwrite");
+    const req = s.delete(id);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -142,158 +162,124 @@ function getAllExpenses() {
   });
 }
 
-function deleteExpense(id) {
-  return new Promise((resolve, reject) => {
-    const s = store("expenses", "readwrite");
-    const req = s.delete(id);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
+// ---------- UI ----------
+function showScreen(name) {
+  for (const el of document.querySelectorAll(".screen")) {
+    el.classList.toggle("hidden", el.id !== name);
+  }
+  for (const btn of document.querySelectorAll("[data-screen]")) {
+    btn.classList.toggle("active", btn.dataset.screen === name);
+  }
 }
 
-async function clearAllData() {
-  await new Promise((res, rej) => {
-    const tx = db.transaction(["expenses", "settings", "categories"], "readwrite");
-    tx.objectStore("expenses").clear();
-    tx.objectStore("settings").clear();
-    tx.objectStore("categories").clear();
-    tx.oncomplete = () => res();
-    tx.onerror = () => rej(tx.error);
-  });
-}
-
-// ---------- UI: Tabs ----------
-function showView(name) {
-  const views = {
-    expenses: $("viewExpenses"),
-    summary: $("viewSummary"),
-    settings: $("viewSettings"),
-  };
-  const tabs = {
-    expenses: $("tabExpenses"),
-    summary: $("tabSummary"),
-    settings: $("tabSettings"),
-  };
-
-  Object.values(views).forEach((v) => v.classList.add("hidden"));
-  Object.values(tabs).forEach((t) => t.classList.remove("active"));
-  views[name].classList.remove("hidden");
-  tabs[name].classList.add("active");
-
-  if (name === "summary") renderSummary();
-  if (name === "expenses") renderList();
-  if (name === "settings") loadBudgetInputs();
-}
-
-// ---------- UI: Category dropdown ----------
-async function refreshCategoryDropdown(selected = null) {
-  const sel = $("categorySelect");
-  const newWrap = $("newCategoryWrap");
-  const newInput = $("newCategoryInput");
-
+async function renderCategoriesDropdown() {
   const cats = await getAllCategories();
-
-  // If HTML already has fallback options, wipe and rebuild
+  const sel = $("categorySelect");
   sel.innerHTML = "";
-
   for (const c of cats) {
     const opt = document.createElement("option");
-    opt.value = c;
-    opt.textContent = c;
+    opt.value = c.name;
+    opt.textContent = c.name;
     sel.appendChild(opt);
   }
-
-  const optNew = document.createElement("option");
-  optNew.value = "__new__";
-  optNew.textContent = "➕ Agregar nueva categoría…";
-  sel.appendChild(optNew);
-
-  if (selected && cats.includes(selected)) sel.value = selected;
-
-  sel.onchange = () => {
-    if (sel.value === "__new__") {
-      newWrap.style.display = "block";
-      newInput.focus();
-    } else {
-      newWrap.style.display = "none";
-      newInput.value = "";
-    }
-  };
 }
 
-// ---------- UI: Conversion hint ----------
-async function updateConversionHint() {
-  const hint = $("conversionHint");
-  const currency = $("currencySelect")?.value || "ARS";
-  const amount = toNumberOrNull($("amountInput")?.value);
-  const fx = await getSetting("fxRate"); // ARS per 1 USD
-
-  if (!fx || fx <= 0) {
-    hint.textContent = "Tipo de cambio no configurado.";
-    return;
-  }
-
-  if (!amount || amount <= 0) {
-    hint.textContent = `1 USD = ${Number(fx).toLocaleString("es-AR")} ARS`;
-    return;
-  }
-
-  if (currency === "ARS") {
-    const usd = amount / fx;
-    hint.textContent = `Equivale a: ${usd.toLocaleString("es-AR", { style: "currency", currency: "USD" })} (a ${fx} ARS/USD)`;
-  } else {
-    const ars = amount * fx;
-    hint.textContent = `Equivale a: ${ars.toLocaleString("es-AR", { style: "currency", currency: "ARS" })} (a ${fx} ARS/USD)`;
-  }
-}
-
-// ---------- Render: List ----------
-async function renderList() {
-  const list = $("expenseList");
-  const expenses = (await getAllExpenses()).sort((a, b) => new Date(b.date) - new Date(a.date));
+async function renderCategoriesManager() {
+  const cats = await getAllCategories();
+  const list = $("categoriesList");
   list.innerHTML = "";
 
-  if (!expenses.length) {
-    list.innerHTML = `<li><span class="muted">Todavía no hay gastos.</span><span></span></li>`;
-    return;
-  }
+  for (const c of cats) {
+    const row = document.createElement("div");
+    row.className = "row";
 
-  for (const ex of expenses.slice(0, 30)) {
-    const date = new Date(ex.date);
+    const name = document.createElement("div");
+    name.textContent = c.name;
+    name.className = "grow";
 
-    const original =
-      ex.currency === "ARS"
-        ? moneyARS(ex.amountARS ?? ex.amountOriginal)
-        : (Number(ex.amountOriginal ?? 0)).toLocaleString("es-AR", { style: "currency", currency: "USD" });
+    const del = document.createElement("button");
+    del.textContent = "Eliminar";
+    del.className = "btn danger";
+    del.addEventListener("click", async () => {
+      if (!confirm(`¿Eliminar categoría "${c.name}"?`)) return;
+      await deleteCategory(c.name);
+      await renderCategoriesDropdown();
+      await renderCategoriesManager();
+    });
 
-    const left = document.createElement("span");
-    left.textContent = `${ex.category} · ${date.toLocaleDateString("es-AR")} · ${original}`;
-
-    const right = document.createElement("span");
-    right.textContent = money(ex.amountUSD ?? ex.amountOriginal ?? 0);
-
-    const li = document.createElement("li");
-    li.append(left, right);
-
-    li.ondblclick = async () => {
-      if (confirm("¿Borrar este gasto?")) {
-        await deleteExpense(ex.id);
-        renderList();
-      }
-    };
-
-    list.appendChild(li);
+    row.appendChild(name);
+    row.appendChild(del);
+    list.appendChild(row);
   }
 }
 
-// ---------- Render: Summary ----------
+function fmtDateShort(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("es-AR");
+  } catch {
+    return iso;
+  }
+}
+
+async function renderRecent() {
+  const expenses = await getAllExpenses();
+  expenses.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const list = $("recentList");
+  list.innerHTML = "";
+
+  const recent = expenses.slice(0, 12);
+
+  for (const e of recent) {
+    const row = document.createElement("div");
+    row.className = "card";
+
+    const top = document.createElement("div");
+    top.className = "row";
+
+    const title = document.createElement("div");
+    title.className = "grow";
+    const cat = e.category || "—";
+    const storeTxt = e.store ? ` · ${e.store}` : "";
+    title.textContent = `${cat}${storeTxt}`;
+
+    const del = document.createElement("button");
+    del.textContent = "✕";
+    del.className = "icon danger";
+    del.title = "Eliminar";
+    del.addEventListener("click", async () => {
+      if (!confirm("¿Eliminar este gasto?")) return;
+      await deleteExpense(e.id);
+      await renderAll();
+    });
+
+    top.appendChild(title);
+    top.appendChild(del);
+
+    const sub = document.createElement("div");
+    sub.className = "muted";
+    const aUSD = money(e.amountUSD);
+    const aARS = e.amountARS != null
+      ? (Number(e.amountARS)).toLocaleString("es-AR", { style: "currency", currency: "ARS" })
+      : "—";
+
+    sub.textContent = `${fmtDateShort(e.date)} · USD ${aUSD} · ARS ${aARS}`;
+
+    row.appendChild(top);
+    row.appendChild(sub);
+    list.appendChild(row);
+  }
+}
+
 async function renderSummary() {
   const expenses = await getAllExpenses();
+  expenses.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  const total = expenses.reduce((sum, e) => sum + Number(e.amountUSD ?? e.amountOriginal ?? 0), 0);
-
+  // Totales
+  const total = expenses.reduce((s, e) => s + Number(e.amountUSD ?? 0), 0);
   $("totalSpent").textContent = money(total);
 
+  // Presupuesto
   const tripBudget = await getSetting("tripBudget");
   const dailyBudget = await getSetting("dailyBudget");
 
@@ -305,11 +291,9 @@ async function renderSummary() {
     label = `${money(total)} / ${money(tripBudget)}`;
   } else if (dailyBudget && dailyBudget > 0) {
     const hoy = new Date().toLocaleDateString("es-AR");
-
     const totalHoy = expenses
-      .filter((e) => new Date(e.date).toLocaleDateString("es-AR") === hoy)
-      .reduce((s, e) => s + Number(e.amountUSD ?? e.amountOriginal ?? 0), 0);
-
+      .filter(e => new Date(e.date).toLocaleDateString("es-AR") === hoy)
+      .reduce((s, e) => s + Number(e.amountUSD ?? 0), 0);
     pct = Math.min(100, (totalHoy / dailyBudget) * 100);
     label = `Hoy: ${money(totalHoy)} / ${money(dailyBudget)}`;
   }
@@ -317,207 +301,217 @@ async function renderSummary() {
   $("budgetLabel").textContent = label;
   $("progressFill").style.width = `${pct}%`;
 
-  // Por categoría (USD)
+  // Por categoría
   const byCat = new Map();
   for (const e of expenses) {
     const k = (e.category || "Otros").trim();
-    byCat.set(k, (byCat.get(k) || 0) + Number(e.amountUSD ?? e.amountOriginal ?? 0));
+    byCat.set(k, (byCat.get(k) || 0) + Number(e.amountUSD ?? 0));
   }
 
-  const catList = $("byCategory");
+  const cats = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
+  const catList = $("byCategoryList");
   catList.innerHTML = "";
-  if (!byCat.size) {
-    catList.innerHTML = `<li><span class="muted">No hay datos todavía.</span><span></span></li>`;
-  } else {
-    [...byCat.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 25)
-      .forEach(([k, v]) => {
-        const li = document.createElement("li");
-        li.innerHTML = `<span>${k}</span><span>${money(v)}</span>`;
-        catList.appendChild(li);
-      });
+  for (const [k, v] of cats) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const left = document.createElement("div");
+    left.className = "grow";
+    left.textContent = k;
+    const right = document.createElement("div");
+    right.textContent = money(v);
+    row.appendChild(left);
+    row.appendChild(right);
+    catList.appendChild(row);
   }
 
-  // Por día (USD)
+  // Por día
   const byDay = new Map();
   for (const e of expenses) {
-    const d = new Date(e.date).toLocaleDateString("es-AR");
-    byDay.set(d, (byDay.get(d) || 0) + Number(e.amountUSD ?? e.amountOriginal ?? 0));
+    const day = new Date(e.date).toLocaleDateString("es-AR");
+    byDay.set(day, (byDay.get(day) || 0) + Number(e.amountUSD ?? 0));
   }
+  const days = [...byDay.entries()].sort((a, b) => {
+    const da = new Date(a[0].split("/").reverse().join("-"));
+    const dbb = new Date(b[0].split("/").reverse().join("-"));
+    return da - dbb;
+  });
 
-  const dayList = $("byDay");
+  const dayList = $("byDayList");
   dayList.innerHTML = "";
-  if (!byDay.size) {
-    dayList.innerHTML = `<li><span class="muted">No hay datos todavía.</span><span></span></li>`;
-  } else {
-    [...byDay.entries()]
-      .sort((a, b) => new Date(b[0]) - new Date(a[0]))
-      .slice(0, 30)
-      .forEach(([d, v]) => {
-        const li = document.createElement("li");
-        li.innerHTML = `<span>${d}</span><span>${money(v)}</span>`;
-        dayList.appendChild(li);
-      });
+  for (const [k, v] of days) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const left = document.createElement("div");
+    left.className = "grow";
+    left.textContent = k;
+    const right = document.createElement("div");
+    right.textContent = money(v);
+    row.appendChild(left);
+    row.appendChild(right);
+    dayList.appendChild(row);
   }
 }
 
-// ---------- Budget + categories settings ----------
-async function loadBudgetInputs() {
-  const trip = await getSetting("tripBudget");
-  const daily = await getSetting("dailyBudget");
+async function renderBudgetScreen() {
   const fx = await getSetting("fxRate");
+  const tripBudget = await getSetting("tripBudget");
+  const dailyBudget = await getSetting("dailyBudget");
 
-  $("tripBudget").value = trip ?? "";
-  $("dailyBudget").value = daily ?? "";
-  $("fxRate").value = fx ?? "";
+  $("fxRateInput").value = fx ?? "";
+  $("tripBudgetInput").value = tripBudget ?? "";
+  $("dailyBudgetInput").value = dailyBudget ?? "";
+
+  const updated = await getSetting("fxLastUpdated");
+  $("fxLastUpdated").textContent = updated
+    ? new Date(updated).toLocaleString("es-AR")
+    : "—";
 }
 
-// ---------- Export CSV ----------
 async function exportCSV() {
-  const expenses = (await getAllExpenses()).sort((a, b) => new Date(a.date) - new Date(b.date));
+  const expenses = await getAllExpenses();
+  expenses.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  const rows = [
-    ["fecha_iso", "categoria", "moneda", "monto_original", "monto_ars", "monto_usd", "tipo_cambio_usado"],
-    ...expenses.map((e) => [
-      new Date(e.date).toISOString(),
-      e.category ?? "",
-      e.currency ?? "",
-      String(e.amountOriginal ?? ""),
-      String(e.amountARS ?? ""),
-      String(e.amountUSD ?? ""),
-      String(e.fxRateUsed ?? ""),
-    ]),
-  ];
+  const header = ["date", "category", "store", "currency", "amountOriginal", "amountARS", "amountUSD", "fxRateUsed"];
+  const lines = [header.join(",")];
 
-  const csv = rows
-    .map((r) => r.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(","))
-    .join("\n");
+  for (const e of expenses) {
+    const row = [
+      e.date,
+      (e.category || "").replaceAll(",", " "),
+      (e.store || "").replaceAll(",", " "),
+      e.currency || "",
+      e.amountOriginal ?? "",
+      e.amountARS ?? "",
+      e.amountUSD ?? "",
+      e.fxRateUsed ?? "",
+    ];
+    lines.push(row.join(","));
+  }
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = "gastos-viaje.csv";
+  a.download = "gastos.csv";
   document.body.appendChild(a);
   a.click();
   a.remove();
 
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  URL.revokeObjectURL(url);
 }
 
-// ---------- Init ----------
-window.addEventListener("DOMContentLoaded", async () => {
-  await openDB();
-  await seedDefaultCategoriesIfEmpty();
-  await refreshCategoryDropdown();
-  await loadBudgetInputs();
-
-  $("tabExpenses").onclick = () => showView("expenses");
-  $("tabSummary").onclick = () => showView("summary");
-  $("tabSettings").onclick = () => showView("settings");
-
-  $("currencySelect")?.addEventListener("change", updateConversionHint);
-  $("amountInput")?.addEventListener("input", updateConversionHint);
-
-  $("saveBudget").onclick = async () => {
-    const trip = toNumberOrNull($("tripBudget").value);
-    const daily = toNumberOrNull($("dailyBudget").value);
-    const fxRate = toNumberOrNull($("fxRate").value);
-
-    await setSetting("tripBudget", trip);
-    await setSetting("dailyBudget", daily);
-    await setSetting("fxRate", fxRate);
-
-    await updateConversionHint();
-    showView("summary");
-  };
-
-  $("addCategoryBtn").onclick = async () => {
-    const input = $("addCategoryInput");
-    const name = input.value.trim();
-    if (!name) return;
-    await addCategory(name);
-    input.value = "";
-    await refreshCategoryDropdown(name);
-    alert("Categoría agregada.");
-  };
-
-  $("resetCategories").onclick = async () => {
-    if (!confirm("¿Restablecer categorías a las predeterminadas?")) return;
-    await resetCategoriesToDefault();
-    alert("Listo.");
-  };
-
-  $("clearAll").onclick = async () => {
-    if (!confirm("¿Borrar todos los gastos, presupuestos y categorías?")) return;
-    await clearAllData();
-    await seedDefaultCategoriesIfEmpty();
-    await refreshCategoryDropdown();
-    await loadBudgetInputs();
-    await renderList();
-    await renderSummary();
-    showView("expenses");
-  };
-
-  $("exportBtn").onclick = exportCSV;
-
-  $("expenseForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-
-    let category = $("categorySelect").value;
-
-    if (category === "__new__") {
-      const typed = $("newCategoryInput").value.trim();
-      if (!typed) return alert("Escribí el nombre de la nueva categoría.");
-      await addCategory(typed);
-      category = typed;
-      await refreshCategoryDropdown(category);
-      $("newCategoryWrap").style.display = "none";
-      $("newCategoryInput").value = "";
-    }
-
-    const currency = $("currencySelect").value; // ARS / USD
-    const amount = toNumberOrNull($("amountInput").value);
-    if (!(amount >= 0)) return;
-
-    const fx = await getSetting("fxRate"); // ARS por 1 USD
-    if ((!fx || fx <= 0) && currency === "ARS") {
-      return alert("Configurá el tipo de cambio (ARS por 1 USD) para cargar montos en ARS.");
-    }
-
-    let amountARS = null;
-    let amountUSD = null;
-
-    if (currency === "ARS") {
-      amountARS = amount;
-      amountUSD = amount / fx;
-    } else {
-      amountUSD = amount;
-      amountARS = fx && fx > 0 ? amount * fx : null;
-    }
-
-    const expense = {
-      id: crypto.randomUUID(),
-      category,
-      currency,
-      amountOriginal: amount,
-      amountARS,
-      amountUSD,
-      fxRateUsed: fx || null,
-      date: todayISO(),
-    };
-
-    await addExpense(expense);
-
-    $("amountInput").value = "";
-    await updateConversionHint();
-    await renderList();
-  });
-
-  await updateConversionHint();
-  await renderList();
+async function renderAll() {
+  await renderCategoriesDropdown();
+  await renderRecent();
   await renderSummary();
-  showView("expenses");
+  await renderCategoriesManager();
+  await renderBudgetScreen();
+}
+
+// ---------- Event handlers ----------
+$("navHome").addEventListener("click", () => showScreen("screenHome"));
+$("navSummary").addEventListener("click", () => showScreen("screenSummary"));
+$("navBudget").addEventListener("click", async () => {
+  await renderBudgetScreen();
+  showScreen("screenBudget");
+});
+$("navCategories").addEventListener("click", async () => {
+  await renderCategoriesManager();
+  showScreen("screenCategories");
+});
+
+$("addCategoryBtn").addEventListener("click", async () => {
+  const name = $("newCategoryInput").value.trim();
+  if (!name) return;
+  await addCategory(name);
+  $("newCategoryInput").value = "";
+  await renderCategoriesDropdown();
+  await renderCategoriesManager();
+});
+
+$("saveBudgetBtn").addEventListener("click", async () => {
+  const fx = toNumberOrNull($("fxRateInput").value);
+  const trip = toNumberOrNull($("tripBudgetInput").value);
+  const daily = toNumberOrNull($("dailyBudgetInput").value);
+
+  if (fx != null) await setSetting("fxRate", fx);
+  if (trip != null) await setSetting("tripBudget", trip);
+  if (daily != null) await setSetting("dailyBudget", daily);
+
+  await setSetting("fxLastUpdated", Date.now());
+  await renderAll();
+  alert("Guardado.");
+});
+
+$("exportBtn").addEventListener("click", exportCSV);
+
+$("expenseForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+
+  const category = $("categorySelect").value;
+  const storeName = $("storeInput")?.value?.trim();
+  const store = storeName ? storeName : null;
+
+  if ($("storeInput")) {
+    $("storeInput").value = "";
+  }
+
+  const currency = $("currencySelect").value; // ARS or USD
+  const amount = toNumberOrNull($("amountInput").value);
+  if (!(amount >= 0)) return;
+
+  let fx = await getSetting("fxRate"); // ARS por 1 USD
+  // Si el gasto es en ARS, intentamos traer el dólar oficial automáticamente.
+  if (currency === "ARS") {
+    try {
+      fx = await getFxRateAuto();
+      await setSetting("fxRate", fx);
+      await setSetting("fxLastUpdated", Date.now());
+    } catch (e) {
+      // Si falla internet, usamos el último guardado (si existe).
+      if (!fx || fx <= 0) {
+        return alert("No se pudo obtener el dólar oficial y no hay tipo de cambio guardado. Probá de nuevo con internet.");
+      }
+    }
+  }
+
+  let amountARS = null;
+  let amountUSD = null;
+
+  if (currency === "ARS") {
+    amountARS = amount;
+    amountUSD = amount / fx;
+  } else {
+    amountUSD = amount;
+    amountARS = fx && fx > 0 ? amount * fx : null;
+  }
+
+  const expense = {
+    id: crypto.randomUUID(),
+    category,
+    store,
+    currency,
+    amountOriginal: amount,
+    amountARS,
+    amountUSD,
+    fxRateUsed: fx || null,
+    date: todayISO()
+  };
+
+  await addExpense(expense);
+
+  $("amountInput").value = "";
+  await renderAll();
+});
+
+
+// ---------- Init ----------
+(async function init() {
+  db = await openDB();
+  await seedDefaultCategoriesIfEmpty();
+  await renderAll();
+  showScreen("screenHome");
+})();
+
 });
