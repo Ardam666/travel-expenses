@@ -410,18 +410,20 @@ async function renderAll() {
 }
 
 // ---------- Event handlers ----------
-$("navHome").addEventListener("click", () => showScreen("screenHome"));
-$("navSummary").addEventListener("click", () => showScreen("screenSummary"));
-$("navBudget").addEventListener("click", async () => {
+$("navHome")?.addEventListener("click", () => showScreen("screenHome"));
+$("navSummary")?.addEventListener("click", () => showScreen("screenSummary"));
+
+$("navBudget")?.addEventListener("click", async () => {
   await renderBudgetScreen();
   showScreen("screenBudget");
 });
-$("navCategories").addEventListener("click", async () => {
+
+$("navCategories")?.addEventListener("click", async () => {
   await renderCategoriesManager();
   showScreen("screenCategories");
 });
 
-$("addCategoryBtn").addEventListener("click", async () => {
+$("addCategoryBtn")?.addEventListener("click", async () => {
   const name = $("newCategoryInput").value.trim();
   if (!name) return;
   await addCategory(name);
@@ -430,7 +432,7 @@ $("addCategoryBtn").addEventListener("click", async () => {
   await renderCategoriesManager();
 });
 
-$("saveBudgetBtn").addEventListener("click", async () => {
+$("saveBudgetBtn")?.addEventListener("click", async () => {
   const fx = toNumberOrNull($("fxRateInput").value);
   const trip = toNumberOrNull($("tripBudgetInput").value);
   const daily = toNumberOrNull($("dailyBudgetInput").value);
@@ -444,9 +446,9 @@ $("saveBudgetBtn").addEventListener("click", async () => {
   alert("Guardado.");
 });
 
-$("exportBtn").addEventListener("click", exportCSV);
+$("exportBtn")?.addEventListener("click", exportCSV);
 
-$("expenseForm").addEventListener("submit", async (ev) => {
+$("expenseForm")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
 
   const category = $("categorySelect").value;
@@ -515,3 +517,4 @@ $("expenseForm").addEventListener("submit", async (ev) => {
 })();
 
 });
+
