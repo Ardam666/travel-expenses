@@ -424,8 +424,9 @@ $("navCategories")?.addEventListener("click", async () => {
 });
 
 $("addCategoryBtn")?.addEventListener("click", async () => {
-  const name = $("newCategoryInput").value.trim();
+  const name = $("newCategoryInput")?.value?.trim();
   if (!name) return;
+
   await addCategory(name);
   $("newCategoryInput").value = "";
   await renderCategoriesDropdown();
@@ -433,15 +434,29 @@ $("addCategoryBtn")?.addEventListener("click", async () => {
 });
 
 $("saveBudgetBtn")?.addEventListener("click", async () => {
-  const fx = toNumberOrNull($("fxRateInput").value);
-  const trip = toNumberOrNull($("tripBudgetInput").value);
-  const daily = toNumberOrNull($("dailyBudgetInput").value);
+  const fx = toNumberOrNull($("fxRateInput")?.value);
+  const trip = toNumberOrNull($("tripBudgetInput")?.value);
+  const daily = toNumberOrNull($("dailyBudgetInput")?.value);
 
-  if (fx != null) await setSetting("fxRate", fx);
-  if (trip != null) await setSetting("tripBudget", trip);
-  if (daily != null) await setSetting("dailyBudget", daily);
+  let changed = false;
 
-  await setSetting("fxLastUpdated", Date.now());
+  if (fx != null) {
+    await setSetting("fxRate", fx);
+    changed = true;
+  }
+  if (trip != null) {
+    await setSetting("tripBudget", trip);
+    changed = true;
+  }
+  if (daily != null) {
+    await setSetting("dailyBudget", daily);
+    changed = true;
+  }
+
+  if (changed) {
+    await setSetting("fxLastUpdated", Date.now());
+  }
+
   await renderAll();
   alert("Guardado.");
 });
@@ -451,30 +466,31 @@ $("exportBtn")?.addEventListener("click", exportCSV);
 $("expenseForm")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
 
-  const category = $("categorySelect").value;
+  const category = $("categorySelect")?.value;
   const storeName = $("storeInput")?.value?.trim();
   const store = storeName ? storeName : null;
 
-  if ($("storeInput")) {
-    $("storeInput").value = "";
-  }
+  if ($("storeInput")) $("storeInput").value = "";
 
-  const currency = $("currencySelect").value; // ARS or USD
-  const amount = toNumberOrNull($("amountInput").value);
+  const currency = $("currencySelect")?.value; // ARS or USD
+  const amount = toNumberOrNull($("amountInput")?.value);
   if (!(amount >= 0)) return;
 
   let fx = await getSetting("fxRate"); // ARS por 1 USD
-  // Si el gasto es en ARS, intentamos traer el dólar oficial automáticamente.
+
+  // ✅ Si el gasto es en ARS, traemos el dólar oficial ONLINE
   if (currency === "ARS") {
     try {
       fx = await getFxRateAuto();
       await setSetting("fxRate", fx);
       await setSetting("fxLastUpdated", Date.now());
     } catch (e) {
-      // Si falla internet, usamos el último guardado (si existe).
+      console.error("FX online falló:", e);
       if (!fx || fx <= 0) {
-        return alert("No se pudo obtener el dólar oficial y no hay tipo de cambio guardado. Probá de nuevo con internet.");
+        alert("No se pudo obtener el dólar oficial y no hay tipo de cambio guardado.");
+        return;
       }
+      // Si hay fx guardado, seguimos con ese.
     }
   }
 
@@ -498,15 +514,20 @@ $("expenseForm")?.addEventListener("submit", async (ev) => {
     amountARS,
     amountUSD,
     fxRateUsed: fx || null,
-    date: todayISO()
+    date: todayISO(),
   };
 
   await addExpense(expense);
 
-  $("amountInput").value = "";
-  await renderAll();
-});
+  if ($("amountInput")) $("amountInput").value = "";
 
+  await renderAll();
+
+  // ✅ Si estás parado en "Presupuesto", refresca la pantalla para que muestre el nuevo fx
+  if (document.querySelector("#screenBudget") && !document.querySelector("#screenBudget")?.classList?.contains("hidden")) {
+    await renderBudgetScreen();
+  }
+});
 
 // ---------- Init ----------
 (async function init() {
@@ -517,4 +538,5 @@ $("expenseForm")?.addEventListener("submit", async (ev) => {
 })();
 
 });
+
 
