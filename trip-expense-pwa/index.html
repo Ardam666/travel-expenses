@@ -1,47 +1,51 @@
 <!doctype html>
 <html lang="es">
 <head>
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#111111" />
   <title>Gastos de Viaje</title>
-
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <script defer src="app.js"></script>
 </head>
+
 <body>
   <header class="topbar">
     <h1>Gastos</h1>
-    <button id="tabExpenses" class="tab active">Cargar</button>
-    <button id="tabSummary" class="tab">Resumen</button>
-    <button id="tabSettings" class="tab">Presupuesto</button>
+
+    <!-- IDs que app.js espera -->
+    <button id="navHome" class="tab active">Cargar</button>
+    <button id="navSummary" class="tab">Resumen</button>
+    <button id="navBudget" class="tab">Presupuesto</button>
+
+    <!-- (Opcional) si tu app.js usa navCategories, lo dejamos aunque no lo muestres -->
+    <button id="navCategories" class="tab hidden" style="display:none;">Categorías</button>
   </header>
 
   <main class="container">
     <!-- CARGAR -->
-    <section id="viewExpenses" class="view">
+    <section id="screenHome" class="view">
       <form id="expenseForm" class="card">
         <label>
           Categoría
           <select id="categorySelect" required>
-  <option value="Café">Café</option>
-  <option value="Supermercado">Supermercado</option>
-  <option value="Restaurante">Restaurante</option>
-  <option value="Transporte">Transporte</option>
-  <option value="Taxi / Uber">Taxi / Uber</option>
-  <option value="Propina">Propina</option>
-  <option value="Farmacia">Farmacia</option>
-  <option value="Compras">Compras</option>
-  <option value="Entretenimiento">Entretenimiento</option>
-  <option value="Otros">Otros</option>
-  <option value="__new__">➕ Agregar nueva categoría…</option>
-</select>
-
+            <option value="Café">Café</option>
+            <option value="Supermercado">Supermercado</option>
+            <option value="Restaurante">Restaurante</option>
+            <option value="Transporte">Transporte</option>
+            <option value="Taxi / Uber">Taxi / Uber</option>
+            <option value="Propina">Propina</option>
+            <option value="Farmacia">Farmacia</option>
+            <option value="Compras">Compras</option>
+            <option value="Entretenimiento">Entretenimiento</option>
+            <option value="Otros">Otros</option>
+            <option value="__new__">➕ Agregar nueva categoría…</option>
+          </select>
         </label>
 
         <label id="newCategoryWrap" style="display:none;">
@@ -49,27 +53,28 @@
           <input id="newCategoryInput" type="text" placeholder="Ej: Café, Uber, Supermercado" autocomplete="off" />
         </label>
 
+        <!-- Si tu app.js usa storeInput, lo incluimos (si no, no molesta) -->
+        <label>
+          Lugar (opcional)
+          <input id="storeInput" type="text" placeholder="Ej: Carrefour, Taxi, Bar..." autocomplete="off" />
+        </label>
+
+        <label>
+          Moneda
+          <select id="currencySelect" required>
+            <option value="ARS" selected>ARS (Pesos)</option>
+            <option value="USD">USD (Dólares)</option>
+          </select>
+        </label>
+
         <label>
           Monto
-          <label>
-  Moneda
-  <select id="currencySelect" required>
-  <option value="ARS" selected>ARS (Pesos)</option>
-  <option value="USD">USD (Dólares)</option>
-</select>
-
-</label>
-
-<label>
-  Monto
-  <input id="amountInput" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required />
-</label>
-
-<p class="muted" id="conversionHint" style="margin-top:-6px;">
-  Tipo de cambio no configurado.
-</p>
-
+          <input id="amountInput" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required />
         </label>
+
+        <p class="muted" id="conversionHint" style="margin-top:-6px;">
+          Tipo de cambio no configurado.
+        </p>
 
         <button type="submit" class="primary">Agregar</button>
         <p class="muted">Tip: tocá dos veces un gasto para borrarlo.</p>
@@ -80,12 +85,14 @@
           <strong>Recientes</strong>
           <button id="exportBtn" class="ghost">Exportar CSV</button>
         </div>
-        <ul id="expenseList" class="list"></ul>
+
+        <!-- app.js esperaba recentList (no expenseList) -->
+        <ul id="recentList" class="list"></ul>
       </div>
     </section>
 
     <!-- RESUMEN -->
-    <section id="viewSummary" class="view hidden">
+    <section id="screenSummary" class="view hidden">
       <div class="card">
         <h2>Total</h2>
         <div class="big" id="totalSpent">$0.00</div>
@@ -103,53 +110,72 @@
 
       <div class="card">
         <h2>Por categoría</h2>
-        <ul id="byCategory" class="list"></ul>
+        <!-- app.js suele esperar byCategoryList -->
+        <ul id="byCategoryList" class="list"></ul>
       </div>
 
       <div class="card">
         <h2>Por día</h2>
-        <ul id="byDay" class="list"></ul>
+        <!-- app.js suele esperar byDayList -->
+        <ul id="byDayList" class="list"></ul>
       </div>
+
+      <!-- Por compatibilidad, si tu app.js usa ids más cortos también -->
+      <ul id="byCategory" class="list" style="display:none;"></ul>
+      <ul id="byDay" class="list" style="display:none;"></ul>
     </section>
 
     <!-- PRESUPUESTO -->
-    <section id="viewSettings" class="view hidden">
+    <section id="screenBudget" class="view hidden">
       <div class="card">
         <h2>Presupuesto</h2>
-<label>
-  Tipo de cambio (ARS por 1 USD)
-  <input id="fxRate" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Ej: 1200.00" />
-</label>
 
+        <!-- app.js espera fxRateInput -->
+        <label>
+          Tipo de cambio (ARS por 1 USD)
+          <input id="fxRateInput" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Ej: 1200.00" />
+        </label>
+
+        <!-- app.js espera tripBudgetInput -->
         <label>
           Presupuesto total del viaje (opcional)
-          <input id="tripBudget" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Ej: 800.00" />
+          <input id="tripBudgetInput" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Ej: 800.00" />
         </label>
 
+        <!-- app.js espera dailyBudgetInput -->
         <label>
           Presupuesto diario (opcional)
-          <input id="dailyBudget" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Ej: 50.00" />
+          <input id="dailyBudgetInput" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Ej: 50.00" />
         </label>
 
-        <button id="saveBudget" class="primary">Guardar</button>
+        <!-- app.js espera saveBudgetBtn -->
+        <button id="saveBudgetBtn" class="primary">Guardar</button>
 
         <hr style="border:0;border-top:1px solid var(--line);margin:14px 0;" />
 
         <h2>Categorías</h2>
+
+        <!-- app.js espera addCategoryBtn y newCategoryInput (ya está arriba).
+             Creamos un input con el id que tu HTML tenía pero además
+             duplicamos a uno que app.js pueda usar si lo necesita -->
         <label>
           Agregar categoría
           <div class="row" style="align-items:stretch;">
-            <input id="addCategoryInput" type="text" placeholder="Ej: Taxi, Propina, Farmacia" />
+            <input id="newCategoryInputBudget" type="text" placeholder="Ej: Taxi, Propina, Farmacia" />
             <button id="addCategoryBtn" class="ghost" style="width:auto;">Agregar</button>
           </div>
         </label>
 
+        <!-- Si tu app.js tiene reset/clear -->
         <button id="resetCategories" class="ghost">Restablecer categorías</button>
         <button id="clearAll" class="danger">Borrar todo</button>
 
         <p class="muted">Todo queda guardado localmente en tu teléfono.</p>
       </div>
     </section>
+
+    <!-- Pantalla opcional por si tu app.js la usa -->
+    <section id="screenCategories" class="view hidden"></section>
   </main>
 
   <script>
